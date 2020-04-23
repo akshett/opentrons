@@ -7,7 +7,7 @@ from opentrons.hardware_control.types import Axis
 from robot_server.service.models.control import PointField, Point
 
 
-class SessionTypes(str, Enum):
+class SessionType(str, Enum):
     """The available session types"""
     check = 'check'
 

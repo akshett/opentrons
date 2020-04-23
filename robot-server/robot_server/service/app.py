@@ -16,7 +16,7 @@ from .errors import V1HandlerError, \
 from .dependencies import get_rpc_server
 from robot_server import constants
 
-from .routers import item, routes
+from .routers import item, legacy_routes, routes
 
 log = logging.getLogger(__name__)
 
@@ -31,14 +31,17 @@ app = FastAPI(
     version=__version__,
 )
 
-
-app.include_router(router=routes,
+# Legacy routes
+app.include_router(router=legacy_routes,
                    tags=[constants.V1_TAG],
                    responses={
                        HTTP_422_UNPROCESSABLE_ENTITY: {
                            "model": V1BasicResponse
                        }
                    })
+
+# New v2 routes
+app.include_router(router=routes)
 
 # TODO(isk: 3/18/20): this is an example route, remove item route and model
 # once response work is implemented in new route handlers
