@@ -21,4 +21,5 @@ legacy_routes.include_router(router=rpc.router, tags=["RPC"])
 
 routes = APIRouter()
 routes.include_router(router=calibration_check.router,
+                      prefix="/calibration",
                       tags=["Calibration Check"])

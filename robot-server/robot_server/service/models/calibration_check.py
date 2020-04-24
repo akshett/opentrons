@@ -73,8 +73,6 @@ class CalibrationSessionStatus(BaseModel):
     """
     instruments: Dict[str, AttachedPipette]
     currentStep: str = Field(..., description="Current step of session")
-    nextSteps: Dict[str, Dict[str, Dict[str, Any]]] = \
-        Field(..., description="Next Available Step in Session")
     labware: List[LabwareStatus]
 
     class Config:
