@@ -15,20 +15,22 @@ from robot_server.service.dependencies import get_hardware,\
 from robot_server.service.models.calibration_check import SessionType
 
 
-@pytest.fixture
-def mock_cal_session():
-    m = MagicMock(spec=CheckCalibrationSession)
-
-    m.current_state_name = CalibrationCheckState.preparingPipette
-    m.get_potential_triggers.return_value = {
-        CalibrationCheckTrigger.jog,
-        CalibrationCheckTrigger.pick_up_tip,
-        CalibrationCheckTrigger.exit}
-
-    get_calibration_session_manager().sessions[SessionType.check] = m
-    yield m
-    del get_calibration_session_manager().sessions[SessionType.check]
-
+#
+# @pytest.fixture
+# def mock_cal_session():
+#     m = MagicMock(spec=CheckCalibrationSession)
+#
+#     m.current_state_name = CalibrationCheckState.preparingPipette
+#     m.get_potential_triggers.return_value = {
+#         CalibrationCheckTrigger.jog,
+#         CalibrationCheckTrigger.pick_up_tip,
+#         CalibrationCheckTrigger.exit
+#     }
+#
+#     get_calibration_session_manager().sessions[SessionType.check] = m
+#     yield m
+#     del get_calibration_session_manager().sessions[SessionType.check]
+#
 
 @pytest.mark.parametrize(
     argnames=("path", "method",),
@@ -58,12 +60,17 @@ def test_get_api_needs_session(api_client, path, method):
     }
 
 
-def test_get_session(api_client, mock_cal_session):
-    resp = api_client.get("/calibration/check/session")
+def test_get_session(cal_check_session, cal_check_api_client):
+    resp = cal_check_api_client.get("/calibration/check/session")
 
     assert resp.status_code == 200
     assert resp.json() == {
+        "links": {
 
+        },
+        "data": {
+
+        }
     }
 
 
@@ -73,6 +80,7 @@ def test_get_session(api_client, mock_cal_session):
 ########################################
 ## Below are ports of the aiohttp tests.
 ########################################
+
 
 
 @pytest.fixture
