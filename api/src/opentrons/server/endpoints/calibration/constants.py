@@ -57,9 +57,5 @@ LOOKUP_LABWARE: Dict[str, LabwareLookUp] = {
 }
 
 
-class LabwareLoaded(Exception):
-    pass
-
-
 class TipAttachError(Exception):
     pass

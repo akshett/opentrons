@@ -3,7 +3,7 @@ from aiohttp import web
 from aiohttp.web_urldispatcher import UrlDispatcher
 from .session import CheckCalibrationSession, CalibrationCheckTrigger
 from .models import CalibrationSessionStatus, LabwareStatus, AttachedPipette
-from .constants import ALLOWED_SESSIONS, LabwareLoaded, TipAttachError
+from .constants import ALLOWED_SESSIONS, TipAttachError
 from .util import StateMachineError
 
 
@@ -118,7 +118,7 @@ async def misc_error_handling(
     """
     try:
         response = await handler(request, session)
-    except (TipAttachError, LabwareLoaded, StateMachineError) as e:
+    except (TipAttachError, StateMachineError) as e:
         router = request.app.router
         if isinstance(e, TipAttachError):
             type = request.match_info['type']

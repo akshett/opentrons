@@ -21,6 +21,10 @@ from robot_server.service.routers import calibration_check
 def mock_cal_session():
     m = MagicMock(spec=CheckCalibrationSession)
 
+    async def trigger(*args, **kwargs):
+        pass
+    m.trigger_transition.side_effect = trigger
+
     m.current_state_name = CalibrationCheckState.preparingPipette
     m.get_potential_triggers.return_value = {
         CalibrationCheckTrigger.jog,
@@ -33,23 +37,40 @@ def mock_cal_session():
     del get_calibration_session_manager().sessions[SessionType.check]
 
 
+def make_request(pipette_id=None, vector=None):
+    """helper to make a request"""
+    pipette_id = pipette_id or uuid4()
+    data = {
+        "pipetteId": str(pipette_id)
+    }
+    if vector:
+        data['vector'] = vector
+    return {
+        'data': {
+            'type': 'SpecificPipette' if not vector else 'JogPosition',
+            'attributes': data
+        }
+    }
+
+
 @pytest.mark.parametrize(
-    argnames=("path", "method",),
+    argnames=("path", "method", "payload"),
     argvalues=(
-        ("session", "GET",),
-        ("session/loadLabware", "POST",),
-        ("session/preparePipette", "POST"),
-        ("session/pickUpTip", "POST"),
-        ("session/invalidateTip", "POST"),
-        ("session/confirmTip", "POST"),
-        ("session/jog", "POST"),
-        ("session/confirmStep", "POST"),
-        ("session", "DELETE"),
+        ("session", "GET", None),
+        ("session/loadLabware", "POST", None),
+        ("session/preparePipette", "POST", make_request()),
+        ("session/pickUpTip", "POST", make_request()),
+        ("session/invalidateTip", "POST", make_request()),
+        ("session/confirmTip", "POST", make_request()),
+        ("session/jog", "POST", make_request(vector=[0, 1, 0])),
+        ("session/confirmStep", "POST", make_request()),
+        ("session", "DELETE", None),
     )
 )
-def test_get_api_needs_session(api_client, path, method):
+def test_get_api_needs_session(api_client, path, method, payload):
     """Test that api requiring a current session fail"""
-    r = api_client.request(method=method, url=f"/calibration/check/{path}")
+    r = api_client.request(method=method, url=f"/calibration/check/{path}",
+                           json=payload)
     assert r.status_code == 404
     assert r.json() == {
         "errors": [{
@@ -62,22 +83,25 @@ def test_get_api_needs_session(api_client, path, method):
 
 
 @pytest.mark.parametrize(
-    argnames=("path", "method",),
+    argnames=("path", "method", "payload"),
     argvalues=(
-            ("session", "GET",),
-            ("session/loadLabware", "POST",),
-            ("session/preparePipette", "POST"),
-            ("session/pickUpTip", "POST"),
-            ("session/invalidateTip", "POST"),
-            ("session/confirmTip", "POST"),
-            ("session/jog", "POST"),
-            ("session/confirmStep", "POST"),
-            ("session", "DELETE"),
+            ("session", "GET", None),
+            ("session/loadLabware", "POST", None),
+            ("session/preparePipette", "POST", make_request()),
+            ("session/pickUpTip", "POST", make_request()),
+            ("session/invalidateTip", "POST", make_request()),
+            ("session/confirmTip", "POST", make_request()),
+            ("session/jog", "POST", make_request(vector=[0, 1, 0])),
+            ("session/confirmStep", "POST", make_request()),
+            ("session", "DELETE", None),
     )
 )
-def test_api_return_session_status(api_client, mock_cal_session, path, method):
+def test_api_return_session_status(api_client, mock_cal_session,
+                                   path, method, payload):
     """Test that each endpoint returns the session status"""
-    resp = api_client.request(method=method, url=f"/calibration/check/{path}")
+    resp = api_client.request(method=method,
+                              url=f"/calibration/check/{path}",
+                              json=payload)
 
     assert resp.status_code == 200
     # Result of mock data
@@ -168,7 +192,7 @@ def test_create_session_response(mock_cal_session):
                     'id': lw.id
                 } for lw in labware.values()]
             },
-            'type': ""
+            'type': "CalibrationSessionStatus"
         },
         'links': {
             'delete_session': {
@@ -242,10 +266,12 @@ def test_load_labware(cal_check_api_client, cal_check_session):
     assert cal_check_session._deck['6'].name == 'opentrons_96_tiprack_300ul'
 
 
-async def test_move_to_position(cal_check_api_client, cal_check_session):
+def test_move_to_position(cal_check_api_client, cal_check_session):
     # load labware on deck to enable move
     resp = cal_check_api_client.post('/calibration/check/session/loadLabware')
-    status = resp.json()
+    response_json = resp.json()
+
+    status = response_json['data']['attributes']
 
     pip_id = list(status['instruments'].keys())[0]
 
@@ -259,99 +285,108 @@ async def test_move_to_position(cal_check_api_client, cal_check_session):
 
     resp = cal_check_api_client.post(
         '/calibration/check/session/preparePipette',
-        json={'pipetteId': pip_id})
+        json=make_request(pipette_id=pip_id)
+    )
 
     assert resp.status_code == 200
 
-    curr_pos = await cal_check_session.hardware.gantry_position(mount)
+    curr_pos = asyncio.get_event_loop().run_until_complete(
+        cal_check_session.hardware.gantry_position(mount)
+    )
     assert curr_pos == (well.top()[0] + types.Point(0, 0, 10))
 
 
-async def test_jog_pipette(cal_check_api_client, cal_check_session):
+def test_jog_pipette(cal_check_api_client, cal_check_session):
     cal_check_session._set_current_state('preparingPipette')
 
-    pipette_id = list(cal_check_session.pipette_status.keys())[0]
+    pipette_id = list(cal_check_session.pipette_status().keys())[0]
     mount = types.Mount.LEFT
 
-    old_pos = await cal_check_session.hardware.gantry_position(mount)
+    old_pos = asyncio.get_event_loop().run_until_complete(cal_check_session.hardware.gantry_position(mount))
     resp = cal_check_api_client.post(
         '/calibration/check/session/jog',
-        json={'pipetteId': pipette_id, 'vector': [0, -1, 0]})
+        json=make_request(pipette_id=pipette_id, vector=[0, -1, 0])
+    )
 
     assert resp.status_code == 200
 
-    new_pos = await cal_check_session.hardware.gantry_position(mount)
+    new_pos = asyncio.get_event_loop().run_until_complete(cal_check_session.hardware.gantry_position(mount))
 
     assert (new_pos - old_pos) == types.Point(0, -1, 0)
 
 
-async def test_pickup_tip(cal_check_api_client, cal_check_session):
+def test_pickup_tip(cal_check_api_client, cal_check_session):
     cal_check_api_client.post('/calibration/check/session/loadLabware')
 
     cal_check_session._set_current_state('preparingPipette')
 
-    pipette_id = list(cal_check_session.pipette_status.keys())[0]
+    pipette_id = str(list(cal_check_session.pipette_status().keys())[0])
     resp = cal_check_api_client.post(
         '/calibration/check/session/pickUpTip',
-        json={'pipetteId': pipette_id})
+        json=make_request(pipette_id=pipette_id)
+    )
 
-    text = resp.json()
+    response_json = resp.json()
+    status = response_json['data']['attributes']
     assert resp.status_code == 200
-    assert text['instruments'][pipette_id]['has_tip'] is True
-    assert text['instruments'][pipette_id]['tip_length'] > 0.0
+    assert status['instruments'][pipette_id]['has_tip'] is True
+    assert status['instruments'][pipette_id]['tip_length'] > 0.0
 
 
 def test_invalidate_tip(cal_check_api_client, cal_check_session):
     cal_check_api_client.post('/calibration/check/session/loadLabware')
 
     cal_check_session._set_current_state('preparingPipette')
-    pipette_id = list(cal_check_session.pipette_status.keys())[0]
+    pipette_id = str(list(cal_check_session.pipette_status().keys())[0])
     resp = cal_check_api_client.post(
         '/calibration/check/session/invalidateTip',
-        json={'pipetteId': pipette_id})
+        json=make_request(pipette_id=pipette_id))
     assert resp.status_code == 409
     resp = cal_check_api_client.post(
         '/calibration/check/session/pickUpTip',
-        json={'pipetteId': pipette_id})
-    text = resp.json()
-    assert text['instruments'][pipette_id]['has_tip'] is True
+        json=make_request(pipette_id=pipette_id))
+    response_json = resp.json()
+    assert response_json['data']['attributes']['instruments'][pipette_id]['has_tip'] is True
 
     resp = cal_check_api_client.post(
         '/calibration/check/session/invalidateTip',
-        json={'pipetteId': pipette_id})
-    text = resp.json()
-    assert text['instruments'][pipette_id]['has_tip'] is False
+        json=make_request(pipette_id=pipette_id))
+    response_json = resp.json()
+    assert response_json['data']['attributes']['instruments'][pipette_id]['has_tip'] is False
     assert resp.status_code == 200
 
 
 def test_drop_tip(cal_check_api_client, cal_check_session):
     cal_check_api_client.post('/calibration/check/session/loadLabware')
 
-    pipette_id = list(cal_check_session.pipette_status.keys())[0]
+    pipette_id = str(list(cal_check_session.pipette_status().keys())[0])
     resp = cal_check_api_client.post(
         '/calibration/check/session/preparePipette',
-        json={'pipetteId': pipette_id})
+        json=make_request(pipette_id))
     assert resp.status_code == 200
     resp = cal_check_api_client.post(
         '/calibration/check/session/pickUpTip',
-        json={'pipetteId': pipette_id})
+        json=make_request(pipette_id))
     assert resp.status_code == 200
     resp = cal_check_api_client.post(
         '/calibration/check/session/confirmTip',
-        json={'pipetteId': pipette_id})
+        json=make_request(pipette_id))
     assert resp.status_code == 200
 
-    text = resp.json()
+    response_json = resp.json()
+    status = response_json['data']['attributes']
 
-    assert text['instruments'][pipette_id]['has_tip'] is True
+    assert status['instruments'][pipette_id]['has_tip'] is True
 
     cal_check_session._set_current_state('checkingHeight')
     resp = cal_check_api_client.post(
         '/calibration/check/session/confirmStep',
-        json={'pipetteId': pipette_id})
+        json=make_request(pipette_id))
     assert resp.status_code == 200
-    text = resp.json()
-    assert text['instruments'][pipette_id]['has_tip'] is False
+    response_json = resp.json()
+    status = response_json['data']['attributes']
+
+    assert status['instruments'][pipette_id]['has_tip'] is False
 
 
 def _interpret_status_results(status, next_step, curr_pip):
